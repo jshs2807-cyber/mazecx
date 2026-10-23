@@ -11,7 +11,7 @@
 
 ## 설치
 
-Python 3.10 이상이 필요하다. 계산과 미로 생성은 numpy, 보고서는 numpy와 matplotlib, 테스트는 pytest를 쓴다.
+Python 3.10 이상이 필요하다. 계산과 미로 생성은 numpy, 그림은 matplotlib와 plotly, 화면은 streamlit, 테스트는 pytest를 쓴다.
 
 ```text
 pip install -r requirements.txt
@@ -108,28 +108,23 @@ runs, seed, meta_*
 
 `report`는 `error`가 비어 있는 행만 모아 스피어만 ρ, 95% 부트스트랩 구간, 피어슨 r을 계산하고 `site/index.html`과 SVG 그림 네 장을 만든다. 그림 안 글자는 영어이고, 설명은 HTML에 한국어로 적는다. 링크는 상대경로다.
 
-## 로컬에서 미리 보기
+웹 화면은 `app.py`다. 왼쪽에서 미로 하나 계산, 여러 미로 비교, 미로 만들기를 고른다.
+
+여러 미로 비교는 탭 두 개다. 미로별 비교는 계산된 미로가 2개 이상일 때 쓸 수 있고, 트레모 평균 걸음 수, 탐욕 라우팅 복잡도, 우리 복잡도 기하평균, 우리 복잡도 산술평균을 표와 그래프로 보여 준다. 값이 클수록 어려운 미로이고, 화면 위의 축 변형을 바꾸면 표와 그래프가 함께 바뀐다. 전체 경향 분석은 성공한 미로가 8개 이상일 때 기존의 상관 분석을 보여 준다. 계산은 모두 계산을 눌렀을 때만 한다. 같은 파일 내용, 반복 횟수, 시드는 다시 계산하지 않고, 이름과 그룹은 표시용이다. 화면 2의 미로는 모두 같은 시드를 쓴다. 화면 1의 비교 목록에 추가를 누르면 방금 계산한 미로가 화면 2 목록에 들어간다.
+
+## 로컬 실행
 
 ```text
 pip install -r requirements.txt
 pytest -q
-python -m mazecx.cli batch data/ --runs 100 --seed 0 --out results/results.csv
-python -m mazecx.cli report results/results.csv --out site/
-python -m http.server 8000 -d site
+streamlit run app.py
 ```
-
-브라우저에서 http://localhost:8000
-
-`data/`에 JSON이 있어야 일괄 계산이 미로를 읽는다. 없을 때는 `generate`로 시험용 미로를 먼저 만들면 된다.
 
 ## 처음 배포하기
 
-1. GitHub에서 새 저장소를 만든다. (무료 계정은 Pages를 쓰려면 공개 저장소여야 한다.)
-2. 이 프로젝트를 그 저장소의 main 브랜치에 push한다.
-3. 저장소 Settings → Pages → Build and deployment → Source를 "GitHub Actions"로 바꾼다.
-4. Actions 탭에서 워크플로가 초록색으로 끝나면, Settings → Pages에 표시된 주소로 보고서를 본다.
-5. 이후에는 data/에 미로 JSON을 넣거나 코드를 고쳐 push하면 자동으로 다시 계산·배포된다.
-
-`main`에 push하거나 Actions에서 수동 실행하면 테스트, `data/` 전체 계산, 보고서 생성, GitHub Pages 배포가 이어진다. `data/`에 `.json`이 하나도 없으면 예시 미로를 임시로 만들어 보고서를 쓰고, 맨 위에 "예시 데이터로 만든 보고서입니다"라고 표시한다. `site/`와 `results/`는 저장소에 올리지 않는다. Actions가 매번 새로 만든다.
-
-워크플로 실행이 10분을 넘으면 `.github/workflows/deploy.yml` 맨 위의 `RUNS`를 줄인다. 기본값은 100이다.
+1. GitHub에 저장소를 만들고 이 프로젝트를 main 브랜치에 push한다.
+2. https://share.streamlit.io 에 GitHub 계정으로 로그인한다.
+3. Create app(또는 New app) → 저장소, 브랜치 main, Main file path에 app.py를 고른다.
+4. App URL에 원하는 이름을 정하고, Advanced settings에서 Python 3.11을 고른 뒤 Deploy를 누른다.
+5. 몇 분 뒤 https://<정한 이름>.streamlit.app 에서 프로그램이 열린다.
+6. 이후 코드를 고쳐 main에 push하면 자동으로 새 코드로 바뀐다. push 전에 로컬에서 pytest가 통과하는지 꼭 확인한다(테스트가 실패해도 배포는 진행되기 때문).

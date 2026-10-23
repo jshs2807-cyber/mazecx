@@ -11,7 +11,10 @@ from mazecx.graph import SpatialGraph
 
 @dataclass(frozen=True)
 class TremauxStats:
-    """걸음 수의 평균, 표본 표준편차, 최소, 최대, L_total로 나눈 값."""
+    """걸음 수 목록으로 계산한 평균, 표본 표준편차, 최소, 최대와 정규화 값.
+
+    samples가 화면의 steps_all이 된다. 평균·표준편차·최소·최댓값은 이 목록에서 구한다.
+    """
 
     mean: float
     std: float

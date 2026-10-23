@@ -83,6 +83,7 @@ def analyze_graph(graph: SpatialGraph, file_label: str, runs: int, seed: int) ->
             "tremaux_std": tremaux.std,
             "tremaux_min": tremaux.minimum,
             "tremaux_max": tremaux.maximum,
+            "steps_all": [int(step) for step in tremaux.samples],
             "tremaux_norm": tremaux.norm,
             "greedy_success_rate": greedy.success_rate,
             "greedy_difficulty": greedy.difficulty,

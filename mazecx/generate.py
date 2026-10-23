@@ -22,6 +22,30 @@ _PLUS_3D = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
 _PLUS_2D = ((1, 0, 0), (0, 1, 0))
 
 
+def generate_documents(
+    sizes: list[int],
+    loops: list[float],
+    count: int,
+    seed: int,
+    dim2d: bool = False,
+) -> list[tuple[str, dict]]:
+    """디스크에 쓰지 않고 (파일 이름, 미로 문서) 목록을 만든다."""
+    _check_generation(sizes, loops, count, seed)
+    n_width = max(2, len(str(max(sizes))))
+    index_width = max(3, len(str(count - 1)))
+    documents: list[tuple[str, dict]] = []
+    running = 0
+    for size in sizes:
+        for loop_p in loops:
+            for index in range(count):
+                file_seed = seed + running
+                document = build_maze(size, float(loop_p), file_seed, dim2d)
+                name = maze_filename(dim2d, size, float(loop_p), index, n_width, index_width)
+                documents.append((name, document))
+                running += 1
+    return documents
+
+
 def generate_dataset(
     out: str | Path,
     sizes: list[int],
@@ -31,26 +55,16 @@ def generate_dataset(
     dim2d: bool = False,
 ) -> list[Path]:
     """(크기, 고리 확률) 조합마다 count개의 미로 JSON을 저장한다."""
-    _check_generation(sizes, loops, count, seed)
     destination = Path(out)
     destination.mkdir(parents=True, exist_ok=True)
-    n_width = max(2, len(str(max(sizes))))
-    index_width = max(3, len(str(count - 1)))
     written: list[Path] = []
-    running = 0
-    for size in sizes:
-        for loop_p in loops:
-            for index in range(count):
-                file_seed = seed + running
-                document = build_maze(size, float(loop_p), file_seed, dim2d)
-                name = maze_filename(dim2d, size, float(loop_p), index, n_width, index_width)
-                path = destination / name
-                path.write_text(
-                    json.dumps(document, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8",
-                )
-                written.append(path)
-                running += 1
+    for name, document in generate_documents(sizes, loops, count, seed, dim2d):
+        path = destination / name
+        path.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        written.append(path)
     return written
 
 

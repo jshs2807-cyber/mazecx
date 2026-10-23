@@ -307,6 +307,28 @@ def test_graph_grid_size_uses_coordinate_span() -> None:
     assert graph.meta == {}
 
 
+def test_coordinate_edges_load_as_a_maze() -> None:
+    """칸 좌표로 적힌 edges도 미로로 읽어 곧은 통로를 압축한다."""
+    import json
+
+    raw = json.loads((EX / "external_dfs.json").read_text(encoding="utf-8"))
+    raw["stats"] = {"cells": 27, "loops": 0}
+    raw["simplified"] = {"vertices": [], "edges": []}
+    graph = load_document(raw)
+    assert graph.n_nodes == 21
+    assert graph.n_edges == 20
+    assert graph.n_loops() == 0
+    assert graph.grid_size() == 3
+    assert graph.is_3d() is True
+    assert graph.shortest_path() == 6
+    assert graph.total_length() == 26
+    assert graph.entry == "0,0,0"
+    assert graph.exit == "2,2,2"
+    assert graph.meta["id"] == "3d_n03_dfs_loop00_000"
+    assert graph.meta["seed"] == 30300000
+    assert graph.meta["loop_ratio"] == 0.0
+
+
 def test_shortest_distance_t2() -> None:
     """간선 길이 기준 최단거리는 출구에서 한 번에 구한다."""
     graph = load_clean("t2.json")

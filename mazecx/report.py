@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import os
 import re
 import shutil
@@ -225,26 +226,34 @@ def baseline_warnings(correlations: list[CorrRow]) -> list[str]:
     return warnings
 
 
+def build_figures(rows: list[dict], overall: GroupReport | None) -> list[plt.Figure]:
+    """비교 그림 네 장을 메모리에서 만든다. 그림 글자는 영어만 쓴다."""
+    return [
+        _scatter(rows, "tremaux_mean", "tremaux_mean (mean number of Tremaux steps)", None),
+        _scatter(rows, "greedy_difficulty", "greedy_difficulty (1 minus greedy success rate)", None),
+        _correlation_figure(overall, None),
+        _difference_figure(overall, None),
+    ]
+
+
 def save_figures(rows: list[dict], overall: GroupReport | None, directory: Path) -> None:
     """산점도 두 장과 구간 그림 두 장을 SVG로 저장한다. 그림 글자는 영어만 쓴다."""
-    _scatter(
-        rows,
-        "tremaux_mean",
-        "tremaux_mean (mean number of Tremaux steps)",
-        directory / FIGURES[0],
-    )
-    _scatter(
-        rows,
-        "greedy_difficulty",
-        "greedy_difficulty (1 minus greedy success rate)",
-        directory / FIGURES[1],
-    )
-    _correlation_figure(overall, directory / FIGURES[2])
-    _difference_figure(overall, directory / FIGURES[3])
+    for figure, name in zip(build_figures(rows, overall), FIGURES):
+        _save(figure, directory / name)
+
+
+def summary_csv_bytes(reports: list[GroupReport]) -> bytes:
+    """그룹별 ρ, 구간, 판정을 UTF-8 BOM CSV 바이트로 만든다."""
+    return _summary_text(reports).encode("utf-8-sig")
 
 
 def write_summary(reports: list[GroupReport], path: Path) -> None:
     """그룹별 ρ, 구간, 판정을 CSV로 저장한다."""
+    path.write_bytes(summary_csv_bytes(reports))
+
+
+def _summary_text(reports: list[GroupReport]) -> str:
+    """그룹별 요약 CSV 본문을 만든다."""
     fieldnames = [
         "group",
         "n",
@@ -260,58 +269,59 @@ def write_summary(reports: list[GroupReport], path: Path) -> None:
         "judgment",
         "warnings",
     ]
-    with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        for report in reports:
-            status = "ok" if report.enough else "표본 부족"
-            warnings = " | ".join(report.warnings)
-            if not report.enough:
-                writer.writerow(
-                    {
-                        "group": report.name,
-                        "n": report.count,
-                        "status": status,
-                        "warnings": warnings,
-                    }
-                )
-                continue
-            for row in report.correlations:
-                writer.writerow(
-                    {
-                        "group": report.name,
-                        "n": report.count,
-                        "status": status,
-                        "kind": "correlation",
-                        "left": row.predictor,
-                        "right": "",
-                        "target": row.target,
-                        "spearman": row.spearman,
-                        "ci_low": row.ci_low,
-                        "ci_high": row.ci_high,
-                        "pearson": row.pearson,
-                        "judgment": "",
-                        "warnings": warnings,
-                    }
-                )
-            for row in report.differences:
-                writer.writerow(
-                    {
-                        "group": report.name,
-                        "n": report.count,
-                        "status": status,
-                        "kind": row.kind,
-                        "left": row.front,
-                        "right": row.back,
-                        "target": row.target,
-                        "spearman": "",
-                        "ci_low": row.ci_low,
-                        "ci_high": row.ci_high,
-                        "pearson": "",
-                        "judgment": row.judgment,
-                        "warnings": warnings,
-                    }
-                )
+    handle = io.StringIO()
+    writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for report in reports:
+        status = "ok" if report.enough else "표본 부족"
+        warnings = " | ".join(report.warnings)
+        if not report.enough:
+            writer.writerow(
+                {
+                    "group": report.name,
+                    "n": report.count,
+                    "status": status,
+                    "warnings": warnings,
+                }
+            )
+            continue
+        for row in report.correlations:
+            writer.writerow(
+                {
+                    "group": report.name,
+                    "n": report.count,
+                    "status": status,
+                    "kind": "correlation",
+                    "left": row.predictor,
+                    "right": "",
+                    "target": row.target,
+                    "spearman": row.spearman,
+                    "ci_low": row.ci_low,
+                    "ci_high": row.ci_high,
+                    "pearson": row.pearson,
+                    "judgment": "",
+                    "warnings": warnings,
+                }
+            )
+        for row in report.differences:
+            writer.writerow(
+                {
+                    "group": report.name,
+                    "n": report.count,
+                    "status": status,
+                    "kind": row.kind,
+                    "left": row.front,
+                    "right": row.back,
+                    "target": row.target,
+                    "spearman": "",
+                    "ci_low": row.ci_low,
+                    "ci_high": row.ci_high,
+                    "pearson": "",
+                    "judgment": row.judgment,
+                    "warnings": warnings,
+                }
+            )
+    return handle.getvalue()
 
 
 def render_html(
@@ -483,7 +493,7 @@ def _find(reports: list[GroupReport], name: str) -> GroupReport | None:
     return None
 
 
-def _scatter(rows: list[dict], y_key: str, y_label: str, path: Path) -> None:
+def _scatter(rows: list[dict], y_key: str, y_label: str, path: Path | None) -> plt.Figure:
     """C_geo_standard를 로그 눈금 가로축으로 한 산점도를 저장한다."""
     figure, axis = plt.subplots(figsize=(8, 5.4))
     _paint(figure, axis)
@@ -512,14 +522,13 @@ def _scatter(rows: list[dict], y_key: str, y_label: str, path: Path) -> None:
     axis.set_xlabel("C_geo_standard (geometric-mean complexity, log scale)")
     axis.set_ylabel(y_label)
     axis.set_title("Complexity against difficulty")
-    _save(figure, path)
+    return _save(figure, path)
 
 
-def _correlation_figure(overall: GroupReport | None, path: Path) -> None:
+def _correlation_figure(overall: GroupReport | None, path: Path | None) -> plt.Figure:
     """후보와 단순 기준의 ρ와 95% 구간을 검증 기준별로 그린다."""
     if overall is None or not overall.enough:
-        _insufficient(path, "Spearman rho", "measure")
-        return
+        return _insufficient(path, "Spearman rho", "measure")
     figure, axes = plt.subplots(1, 2, figsize=(12.5, 7.2))
     titles = {
         "tremaux_mean": "Tremaux mean",
@@ -544,14 +553,13 @@ def _correlation_figure(overall: GroupReport | None, path: Path) -> None:
         axis.set_xlabel("Spearman rho (95% bootstrap interval)")
         axis.set_ylabel("measure")
         axis.set_title(titles[target])
-    _save(figure, path)
+    return _save(figure, path)
 
 
-def _difference_figure(overall: GroupReport | None, path: Path) -> None:
+def _difference_figure(overall: GroupReport | None, path: Path | None) -> plt.Figure:
     """전체 그룹의 결합 방식 차이와 축 가중치 차이를 구간으로 그린다."""
     if overall is None or not overall.enough:
-        _insufficient(path, "Difference of Spearman rho", "comparison")
-        return
+        return _insufficient(path, "Difference of Spearman rho", "comparison")
     figure, axes = plt.subplots(2, 1, figsize=(11, 9))
     panels = (
         (axes[0], "combine", "C_geo minus C_arith"),
@@ -576,17 +584,17 @@ def _difference_figure(overall: GroupReport | None, path: Path) -> None:
         axis.set_xlabel("Difference of Spearman rho (95% interval)")
         axis.set_ylabel("comparison")
         axis.set_title(title)
-    _save(figure, path)
+    return _save(figure, path)
 
 
-def _insufficient(path: Path, xlabel: str, ylabel: str) -> None:
+def _insufficient(path: Path | None, xlabel: str, ylabel: str) -> plt.Figure:
     """표본이 부족할 때 영어 안내만 있는 그림을 저장한다."""
     figure, axis = plt.subplots(figsize=(8, 4.5))
     _paint(figure, axis)
     axis.text(0.5, 0.5, "Insufficient sample", ha="center", va="center", transform=axis.transAxes)
     axis.set_xlabel(xlabel)
     axis.set_ylabel(ylabel)
-    _save(figure, path)
+    return _save(figure, path)
 
 
 def _paint(figure: plt.Figure, axis: plt.Axes) -> None:
@@ -599,14 +607,17 @@ def _paint(figure: plt.Figure, axis: plt.Axes) -> None:
     axis.title.set_size(12)
 
 
-def _save(figure: plt.Figure, path: Path) -> None:
-    """SVG로 저장하고 한글이 들어갔는지 확인한다."""
+def _save(figure: plt.Figure, path: Path | None) -> plt.Figure:
+    """여백을 맞춘다. 경로가 있으면 SVG로 저장하고 한글이 없는지 확인한다."""
     figure.tight_layout()
+    if path is None:
+        return figure
     figure.savefig(path, format="svg", facecolor="white")
     plt.close(figure)
     text = path.read_text(encoding="utf-8")
     if _HANGUL.search(text):
         raise RuntimeError(f"그림에 한글이 들어 있습니다: {path.name}")
+    return figure
 
 
 def _correlation_table(report: GroupReport) -> str:

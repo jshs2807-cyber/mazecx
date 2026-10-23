@@ -30,7 +30,10 @@ def test_analyze_t1_and_t3_values() -> None:
         warnings.simplefilter("error")
         straight = analyze_file(EX / "t1.json", runs=20, seed=0)
         trapped = analyze_file(EX / "t3.json", runs=10, seed=0)
-    assert list(straight.keys()) == list(RESULT_KEYS)
+    assert [key for key in straight if key != "steps_all"] == list(RESULT_KEYS)
+    assert len(straight["steps_all"]) == 20
+    assert sum(straight["steps_all"]) / len(straight["steps_all"]) == near(straight["tremaux_mean"])
+    assert "steps_all" not in RESULT_KEYS
     assert straight["error"] == ""
     assert straight["is_3d"] is False
     assert straight["grid_size"] == 6

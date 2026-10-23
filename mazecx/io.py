@@ -29,6 +29,8 @@ def load_document(data: dict) -> SpatialGraph:
     """그래프 또는 미로 JSON 객체를 검증해 SpatialGraph로 만든다."""
     if not isinstance(data, dict):
         raise ValueError("입력 JSON의 최상위는 객체여야 합니다.")
+    if "dim" not in data and "nodes" not in data and _has_coordinate_edges(data):
+        data = _coordinate_edges_document(data)
     meta = parse_meta(data)
     if "dim" in data:
         nodes, edges, entry, exit_id = _maze_components(data)
@@ -56,6 +58,120 @@ def parse_meta(data: dict) -> dict[str, str | int | float]:
             )
         meta[key] = value
     return meta
+
+
+def _has_coordinate_edges(data: dict) -> bool:
+    """edges가 정점 이름이 아니라 [x, y, z] 칸 좌표로 이어져 있는지 본다."""
+    edges = data.get("edges")
+    if not isinstance(edges, list) or not edges:
+        return False
+    raw = edges[0]
+    if not isinstance(raw, (list, tuple)) or len(raw) not in (2, 3):
+        return False
+    return _is_coord_like(raw[0]) and _is_coord_like(raw[1])
+
+
+def _is_coord_like(raw: object) -> bool:
+    """값이 [x, y] 또는 [x, y, z] 숫자 좌표인지 확인한다."""
+    if not isinstance(raw, (list, tuple)) or len(raw) not in (2, 3):
+        return False
+    return all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in raw)
+
+
+def _coordinate_edges_document(data: dict) -> dict:
+    """칸 좌표 간선을 미로 형식 또는 그래프 형식으로 바꾼다."""
+    parsed: list[tuple[Coord, Coord, int | None]] = []
+    for index, raw in enumerate(data["edges"]):
+        if not isinstance(raw, (list, tuple)) or len(raw) not in (2, 3):
+            raise ValueError(f"간선은 칸 둘과 선택적 길이여야 합니다. 받은 값: {raw!r}")
+        if not _is_coord_like(raw[0]) or not _is_coord_like(raw[1]):
+            raise ValueError(f"간선 {index}의 끝은 좌표여야 합니다. 받은 값: {raw!r}")
+        left = _normalize_coord(raw[0], f"간선 {index}의 첫 칸")
+        right = _normalize_coord(raw[1], f"간선 {index}의 둘째 칸")
+        length = None
+        if len(raw) == 3:
+            length = _whole_number(raw[2], f"간선 {index}의 길이")
+        parsed.append((left, right, length))
+    entry = _normalize_coord(data.get("entry"), "entry")
+    exit_cell = _normalize_coord(data.get("exit"), "exit")
+    dim = _size_dim(data, [entry, exit_cell, *(cell for pair in parsed for cell in pair[:2])])
+    meta = _scalar_meta(data)
+    unit = all(
+        taxi_distance(left, right) == 1 and (length is None or length == 1)
+        for left, right, length in parsed
+    )
+    if unit:
+        return {
+            "dim": dim,
+            "passages": [[list(left), list(right)] for left, right, _length in parsed],
+            "entry": list(entry),
+            "exit": list(exit_cell),
+            "meta": meta,
+        }
+    nodes: dict[str, list[int]] = {}
+    for cell in (entry, exit_cell, *(cell for pair in parsed for cell in pair[:2])):
+        nodes[_cell_id(cell)] = list(cell)
+    edges: list[list[object]] = []
+    for left, right, length in parsed:
+        edge: list[object] = [_cell_id(left), _cell_id(right)]
+        if length is not None:
+            edge.append(length)
+        edges.append(edge)
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "entry": _cell_id(entry),
+        "exit": _cell_id(exit_cell),
+        "meta": meta,
+    }
+
+
+def _size_dim(data: dict, coords: list[Coord]) -> int:
+    """size가 있으면 그 격자 한 변을, 없으면 좌표 범위로 dim을 정한다."""
+    size = data.get("size")
+    if isinstance(size, list) and size:
+        limits: list[int] = []
+        for item in size:
+            if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+                raise ValueError(f"size의 각 값은 1 이상의 정수여야 합니다. 받은 값: {size!r}")
+            limits.append(item)
+        while len(limits) < 3:
+            limits.append(1)
+        for coord in coords:
+            for axis, limit in enumerate(limits[:3]):
+                if coord[axis] < 0 or coord[axis] >= limit:
+                    raise ValueError(
+                        f"좌표 {list(coord)}가 size {limits[:3]} 밖입니다."
+                    )
+        return max(limits[:3])
+    if not coords:
+        raise ValueError("size 또는 칸 좌표가 있어야 격자 크기를 정할 수 있습니다.")
+    return max(max(coord) for coord in coords) + 1
+
+
+def _scalar_meta(data: dict) -> dict[str, str | int | float]:
+    """좌표 간선 파일의 문자열·숫자 항목을 meta로 옮긴다."""
+    meta: dict[str, str | int | float] = {}
+    existing = data.get("meta")
+    if isinstance(existing, dict):
+        meta.update(parse_meta({"meta": existing}))
+    for key in ("id", "algorithm", "loop_ratio", "seed", "dimension"):
+        if key not in data:
+            continue
+        value = data[key]
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            continue
+        meta[key] = value
+    return meta
+
+
+def _whole_number(raw: object, context: str) -> int:
+    """정수 또는 정수로 떨어지는 실수를 정수로 바꾼다."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(f"{context}는 정수여야 합니다. 받은 값: {raw!r}")
+    if isinstance(raw, float) and not raw.is_integer():
+        raise ValueError(f"{context}는 정수여야 합니다. 받은 값: {raw!r}")
+    return int(raw)
 
 
 def _graph_components(data: dict) -> tuple[dict[str, Coord], list[RawEdge], str, str]:
