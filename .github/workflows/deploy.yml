@@ -1,0 +1,80 @@
+name: Build and deploy report
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# permissions를 적으면 적지 않은 권한은 none이 된다.
+# deploy-pages가 업로드된 아티팩트를 받으려면 actions: read가 필요하다.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  RUNS: 100
+  SEED: 0
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Use example mazes when data has no JSON
+        id: data
+        run: |
+          mkdir -p data results
+          if ! find data -name '*.json' -print -quit | grep -q .; then
+            python -m mazecx.cli generate --out data/ --sizes 4 5 --loops 0 0.15 --count 10 --seed "$SEED"
+            echo "example=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "example=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compute every maze
+        run: python -m mazecx.cli batch data/ --runs "$RUNS" --seed "$SEED" --out results/results.csv
+      - name: Build the report
+        run: |
+          if [ "${{ steps.data.outputs.example }}" = "true" ]; then
+            python -m mazecx.cli report results/results.csv --out site/ --banner "예시 데이터로 만든 보고서입니다"
+          else
+            python -m mazecx.cli report results/results.csv --out site/
+          fi
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
