@@ -33,7 +33,7 @@ from mazecx.compare import (
 )
 from mazecx.complexity import AXIS_WEIGHTS
 from mazecx.generate import generate_documents
-from mazecx.io import load_document
+from mazecx.io import load_document, split_documents
 from mazecx.report import GroupReport, analyze_results, build_figures, summary_csv_bytes
 
 ROOT = Path(__file__).resolve().parent
@@ -64,6 +64,7 @@ def page_single() -> None:
     upload_tab, paste_tab, example_tab = st.tabs(("JSON 파일 올리기", "JSON 직접 붙여 넣기", "예시 고르기"))
     with upload_tab:
         uploaded = st.file_uploader("미로 JSON", type=["json"], key="one_file")
+        st.caption("파일 내용이 미로 배열이면 미로마다 따로 계산해 비교 목록에 넣습니다.")
         if st.button("계산하기", key="calc_upload"):
             _calculate_upload(uploaded, int(runs), int(seed))
     with paste_tab:
@@ -85,12 +86,20 @@ def page_single() -> None:
 def page_compare() -> None:
     """비교 목록을 계산하고, 미로별 비교와 전체 경향을 탭으로 보여 준다."""
     st.header("여러 미로 비교")
-    st.caption("계산은 모두 계산을 눌렀을 때만 합니다. 같은 파일 내용, 반복 횟수, 시드는 다시 계산하지 않습니다.")
+    st.caption(
+        "계산은 모두 계산을 눌렀을 때만 합니다. 같은 파일 내용, 반복 횟수, 시드는 다시 계산하지 않습니다. "
+        "JSON 파일 하나가 미로 배열이면 미로마다 따로 넣습니다."
+    )
     runs = st.number_input("트레모 반복 횟수", min_value=10, max_value=5000, value=100, step=10, key="runs_many")
     seed = st.number_input("seed", value=0, step=1, key="seed_many")
     mode = st.radio("입력", ("JSON 여러 개", "ZIP 하나"), horizontal=True, key="compare_mode")
     if mode == "JSON 여러 개":
-        uploaded = st.file_uploader("미로 JSON", type=["json"], accept_multiple_files=True, key="many_json")
+        uploaded = st.file_uploader(
+            "미로 JSON. 파일 하나가 미로 배열이어도 됩니다.",
+            type=["json"],
+            accept_multiple_files=True,
+            key="many_json",
+        )
         files = list(uploaded or [])
     else:
         zip_file = st.file_uploader("미로 ZIP", type=["zip"], key="many_zip")
@@ -177,9 +186,27 @@ def _calculate_upload(uploaded: object, runs: int, seed: int) -> None:
 
 
 def _calculate_text(text: str, label: str, runs: int, seed: int) -> None:
-    """JSON 문자열 하나를 계산해 세션에 남긴다."""
+    """JSON 문자열 하나를 계산해 세션에 남긴다. 배열이면 미로마다 비교 목록에 넣는다."""
     if not text.strip():
         st.error("계산할 JSON이 비어 있습니다.")
+        return
+    try:
+        documents = split_documents(text, label)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    except Exception as exc:
+        st.exception(exc)
+        return
+    if len(documents) > 1:
+        if len(documents) > MAX_FILES:
+            st.error("파일은 최대 1000개까지 올릴 수 있습니다. 계산을 중단합니다.")
+            return
+        _add_documents(documents, runs, seed)
+        st.success(
+            f"묶음 JSON에서 미로 {len(documents)}개를 각각 계산했습니다. "
+            "여러 미로 비교 화면에서 결과를 볼 수 있습니다."
+        )
         return
     try:
         result = dict(cached_analysis(text, runs, seed))
@@ -255,7 +282,13 @@ def _named_texts(files: list, mode: str) -> list[tuple[str, str]] | None:
     if not named:
         st.error("읽을 JSON 파일이 없습니다.")
         return None
-    return named
+    expanded: list[tuple[str, str]] = []
+    for name, text in named:
+        expanded.extend(split_documents(text, name))
+    if len(expanded) > MAX_FILES:
+        st.error("파일은 최대 1000개까지 올릴 수 있습니다. 계산을 중단합니다.")
+        return None
+    return expanded
 
 
 def _run_batch(
@@ -387,9 +420,10 @@ def _append_maze(filename: str, text: str) -> None:
 
 def _calculate_roster(files: list, mode: str, runs: int, seed: int) -> None:
     """올린 파일을 목록에 더한 뒤, 목록 전체를 같은 runs와 seed로 계산한다."""
+    named: list[tuple[str, str]] = []
     if files:
         try:
-            named = _named_texts(files, mode)
+            parsed = _named_texts(files, mode)
         except ValueError as exc:
             st.error(str(exc))
             return
@@ -402,13 +436,19 @@ def _calculate_roster(files: list, mode: str, runs: int, seed: int) -> None:
         except Exception as exc:
             st.exception(exc)
             return
-        if named is None:
+        if parsed is None:
             return
-        known = {item["content"] for item in _roster()}
-        for filename, text in named:
-            if text not in known:
-                _append_maze(filename, text)
-                known.add(text)
+        named = parsed
+    _add_documents(named, runs, seed)
+
+
+def _add_documents(named: list[tuple[str, str]], runs: int, seed: int) -> None:
+    """이름과 JSON 문자열을 비교 목록에 넣고, 목록 전체를 같은 runs와 seed로 계산한다."""
+    known = {item["content"] for item in _roster()}
+    for filename, text in named:
+        if text not in known:
+            _append_maze(filename, text)
+            known.add(text)
     roster = _roster()
     if not roster:
         st.error("계산할 미로가 없습니다.")

@@ -113,6 +113,49 @@ def test_runs_edit_keeps_results_and_axis_changes_the_table() -> None:
     assert row["우리 복잡도 기하평균"] == pytest.approx(C_GEO_T4_A, abs=1e-9)
 
 
+def _sample_bundle() -> bytes:
+    """칸 좌표 미로 두 개를 한 JSON 배열로 묶는다."""
+    mazes = []
+    for name, exit_cell in (("maze_a", [1, 0, 0]), ("maze_b", [0, 1, 0])):
+        mazes.append(
+            {
+                "id": name,
+                "dimension": 2,
+                "size": [2, 2, 1],
+                "entry": [0, 0, 0],
+                "exit": exit_cell,
+                "edges": [[[0, 0, 0], [1, 0, 0], 1], [[0, 0, 0], [0, 1, 0], 1]],
+            }
+        )
+    return json.dumps(mazes).encode("utf-8")
+
+
+def test_json_array_upload_calculates_each_maze() -> None:
+    """미로 배열 JSON 하나를 올리면 미로마다 비교 표의 행이 된다."""
+    at = _open_compare()
+    at.number_input(key="runs_many").set_value(10).run()
+    at.file_uploader(key="many_json").set_value(
+        [("maze_sample_10.json", _sample_bundle(), "application/json")]
+    ).run()
+    at.button(key="calc_many").click().run()
+    assert not at.exception
+    frame = _comparison_frame(at)
+    assert set(frame["이름"]) == {"maze_a", "maze_b"}
+
+
+def test_single_screen_bundle_calculates_each_maze() -> None:
+    """화면 1에 미로 배열을 올리면 각각 계산해 비교 목록에 넣는다."""
+    at = _app()
+    at.run()
+    at.number_input(key="runs_one").set_value(10).run()
+    at.file_uploader(key="one_file").set_value(("bundle.json", _sample_bundle(), "application/json")).run()
+    at.button(key="calc_upload").click().run()
+    assert not at.exception
+    assert [item["name"] for item in at.session_state["roster"]] == ["maze_a", "maze_b"]
+    assert all(item["result"] is not None for item in at.session_state["roster"])
+    assert any("각각" in item.value for item in at.success)
+
+
 def test_ten_generated_mazes_compare_without_error() -> None:
     """만든 미로 10개를 목록에 넣으면 비교 표가 10행이고 예외가 없다."""
     files = [

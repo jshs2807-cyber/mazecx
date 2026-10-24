@@ -25,6 +25,40 @@ def load_path(path: str | Path) -> SpatialGraph:
     return load_document(data)
 
 
+def split_documents(text: str, label: str) -> list[tuple[str, str]]:
+    """JSON 문자열을 미로 하나당 (이름, JSON 문자열)로 나눈다.
+
+    최상위가 객체면 파일 하나다. 최상위가 배열이면 원소마다 미로 하나이고,
+    이름은 id가 있으면 그것을 쓴다.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON 형식이 잘못되었습니다: {exc}") from exc
+    if isinstance(data, dict):
+        return [(label, text)]
+    if not isinstance(data, list):
+        raise ValueError("입력 JSON의 최상위는 객체이거나 미로 배열이어야 합니다.")
+    if not data:
+        raise ValueError("묶음 JSON에 미로가 없습니다.")
+    stem = Path(label).stem or label
+    used: set[str] = set()
+    named: list[tuple[str, str]] = []
+    for index, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"묶음 JSON의 {index}번째 항목은 객체여야 합니다.")
+        raw_name = item.get("id")
+        base = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else f"{stem}_{index}"
+        name = base
+        number = 2
+        while name in used:
+            name = f"{base}_{number}"
+            number += 1
+        used.add(name)
+        named.append((name, json.dumps(item, ensure_ascii=False)))
+    return named
+
+
 def load_document(data: dict) -> SpatialGraph:
     """그래프 또는 미로 JSON 객체를 검증해 SpatialGraph로 만든다."""
     if not isinstance(data, dict):

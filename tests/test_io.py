@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mazecx.io import load_document, load_path, parse_meta
+from mazecx.io import load_document, load_path, parse_meta, split_documents
 
 ROOT = Path(__file__).resolve().parents[1]
 EX = ROOT / "examples"
@@ -327,6 +327,48 @@ def test_coordinate_edges_load_as_a_maze() -> None:
     assert graph.meta["id"] == "3d_n03_dfs_loop00_000"
     assert graph.meta["seed"] == 30300000
     assert graph.meta["loop_ratio"] == 0.0
+
+
+def test_split_documents_keeps_a_single_object() -> None:
+    """객체 하나인 JSON은 나누지 않고 원래 문자열을 그대로 둔다."""
+    text = (EX / "t1.json").read_text(encoding="utf-8")
+    assert split_documents(text, "t1.json") == [("t1.json", text)]
+
+
+def test_split_documents_names_each_maze_in_an_array() -> None:
+    """배열 JSON은 미로마다 나누고, 같은 id는 _2를 붙인다."""
+    import json
+
+    first = {
+        "id": "maze_a",
+        "dimension": 2,
+        "size": [2, 2, 1],
+        "entry": [0, 0, 0],
+        "exit": [1, 0, 0],
+        "edges": [[[0, 0, 0], [1, 0, 0], 1]],
+    }
+    second = {
+        "id": "maze_a",
+        "dimension": 2,
+        "size": [2, 2, 1],
+        "entry": [0, 0, 0],
+        "exit": [0, 1, 0],
+        "edges": [[[0, 0, 0], [0, 1, 0], 1]],
+    }
+    named = split_documents(json.dumps([first, second], ensure_ascii=False), "bundle.json")
+    assert [name for name, _text in named] == ["maze_a", "maze_a_2"]
+    graphs = [load_document(json.loads(text)) for _name, text in named]
+    assert graphs[0].meta["id"] == "maze_a"
+    assert graphs[0].exit == "1,0,0"
+    assert graphs[1].exit == "0,1,0"
+
+
+def test_split_documents_rejects_an_empty_or_scalar_array() -> None:
+    """빈 배열과 객체가 아닌 원소는 계산하지 않는다."""
+    with pytest.raises(ValueError, match="없습니다"):
+        split_documents("[]", "empty.json")
+    with pytest.raises(ValueError, match="객체"):
+        split_documents("[1]", "bad.json")
 
 
 def test_shortest_distance_t2() -> None:
